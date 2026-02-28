@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Job Portal Pro</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <!-- NAVBAR -->
+  <nav class="navbar">
+    <a class="nav-brand" href="/">JobPortal Pro</a>
+    <div class="nav-links" id="navLinks"></div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <h1>Find Your Dream Job</h1>
+    <p>Browse latest job openings from top companies</p>
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Search jobs, company, location..." />
+      <button class="btn btn-primary" onclick="searchJobs()">Search</button>
+    </div>
+  </section>
+
+  <!-- JOBS LIST -->
+  <div class="container">
+    <h2 style="margin-bottom:1rem;" id="jobsTitle">Latest Jobs</h2>
+    <div class="jobs-grid" id="jobsGrid">Loading...</div>
+  </div>
+
+  <!-- POST JOB FORM (visible only for employers) -->
+  <div class="container" id="postJobSection" style="display:none;">
+    <div class="post-form">
+      <h1>Post a New Job</h1>
+      <form onsubmit="postJob(event)">
+        <div class="form-group">
+          <label>Job Title</label>
+          <input type="text" class="form-control" id="pTitle" required />
+        </div>
+        <div class="form-group">
+          <label>Company</label>
+          <input type="text" class="form-control" id="pCompany" required />
+        </div>
+        <div class="form-group">
+          <label>Location</label>
+          <input type="text" class="form-control" id="pLocation" required />
+        </div>
+        <div class="form-group">
+          <label>Job Type</label>
+          <select class="form-control" id="pType" required>
+            <option value="Full-time">Full-time</option>
+            <option value="Part-time">Part-time</option>
+            <option value="Remote">Remote</option>
+            <option value="Internship">Internship</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Salary</label>
+          <input type="text" class="form-control" id="pSalary" placeholder="e.g. 10-15 LPA" />
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea class="form-control" id="pDesc" rows="4" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;">Post Job</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast-box" id="toastBox"></div>
+
+  <script>
+    // ===== AUTH HELPERS =====
+    const getToken = () => localStorage.getItem("token");
+    const getUser = () => { try { return JSON.parse(localStorage.getItem("user")); } catch { return null; } };
+
+    function logout() {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      location.reload();
+    }
+
+    function toast(msg, type = "success") {
+      const box = document.getElementById("toastBox");
+      const t = document.createElement("div");
+      t.className = `toast ${type}`;
+      t.textContent = msg;
+      box.appendChild(t);
+      setTimeout(() => t.remove(), 3000);
+    }
+
+    // ===== NAVBAR =====
+    function updateNav() {
+      const user = getUser();
+      const nav = document.getElementById("navLinks");
+      if (user) {
+        nav.innerHTML = `
+          <span style="font-weight:600;">Hi, ${user.name}</span>
+          <span style="background:#dfe6e9;padding:0.3rem 0.8rem;border-radius:20px;font-size:0.8rem;font-weight:600;">${user.role}</span>
+          <button class="btn btn-outline btn-sm" onclick="logout()">Logout</button>`;
+        if (user.role === "employer") {
+          document.getElementById("postJobSection").style.display = "block";
+        }
+      } else {
+        nav.innerHTML = `
+          <a href="/login.html">Login</a>
+          <a href="/register.html" class="btn btn-primary btn-sm">Register</a>`;
+      }
+    }
+
+    // ===== LOAD JOBS =====
+    async function loadJobs(search = "") {
+      const grid = document.getElementById("jobsGrid");
+      grid.innerHTML = "Loading...";
+
+      try {
+        const url = search ? `/api/jobs?search=${encodeURIComponent(search)}` : "/api/jobs";
+        const res = await fetch(url);
+        const jobs = await res.json();
+
+        if (jobs.length === 0) {
+          grid.innerHTML = `<div class="empty"><h3>No jobs found</h3><p>Try a different search</p></div>`;
+          return;
+        }
+
+        const user = getUser();
+        const isEmployer = user && user.role === "employer";
+
+        grid.innerHTML = jobs.map(job => `
+          <div class="job-card">
+            <h3>${job.title}</h3>
+            <div class="company">${job.company}</div>
+            <div class="job-meta">
+              <span>📍 ${job.location}</span>
+              <span>💼 ${job.job_type}</span>
+            </div>
+            ${job.salary ? `<div class="job-salary">₹ ${job.salary}</div>` : ""}
+            <div class="job-desc">${job.description}</div>
+            ${isEmployer && job.employer_id === user.id
+              ? `<button class="btn btn-danger btn-sm" style="margin-top:0.8rem;" onclick="deleteJob(${job.id})">Delete</button>`
+              : ""}
+          </div>
+        `).join("");
+      } catch (err) {
+        grid.innerHTML = `<div class="empty"><h3>Error loading jobs</h3><p>Make sure the server is running</p></div>`;
+      }
+    }
+
+    function searchJobs() {
+      const q = document.getElementById("searchInput").value.trim();
+      document.getElementById("jobsTitle").textContent = q ? `Results for "${q}"` : "Latest Jobs";
+      loadJobs(q);
+    }
+
+    document.getElementById("searchInput").addEventListener("keypress", e => {
+      if (e.key === "Enter") searchJobs();
+    });
+
+    // ===== POST JOB =====
+    async function postJob(e) {
+      e.preventDefault();
+      try {
+        const res = await fetch("/api/jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${getToken()}` },
+          body: JSON.stringify({
+            title: document.getElementById("pTitle").value,
+            company: document.getElementById("pCompany").value,
+            location: document.getElementById("pLocation").value,
+            job_type: document.getElementById("pType").value,
+            salary: document.getElementById("pSalary").value,
+            description: document.getElementById("pDesc").value,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          toast("Job posted!");
+          e.target.reset();
+          loadJobs();
+        } else {
+          toast(data.error, "error");
+        }
+      } catch { toast("Server error", "error"); }
+    }
+
+    // ===== DELETE JOB =====
+    async function deleteJob(id) {
+      if (!confirm("Delete this job?")) return;
+      try {
+        const res = await fetch(`/api/jobs/${id}`, {
+          method: "DELETE",
+          headers: { "Authorization": `Bearer ${getToken()}` },
+        });
+        if (res.ok) { toast("Job deleted!"); loadJobs(); }
+        else toast("Failed to delete", "error");
+      } catch { toast("Server error", "error"); }
+    }
+
+    // ===== INIT =====
+    updateNav();
+    loadJobs();
+  </script>
+</body>
+</html>
